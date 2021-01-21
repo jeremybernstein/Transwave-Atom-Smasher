@@ -21,8 +21,16 @@ use File::Basename;
 # system("cls");
 
 # Info for runtime splash.
-my $currentVersion = "0.2";
-my $currentYear = "2020";
+my $currentVersion = "0.3";
+my $currentYear = "2021";
+
+my $osName = "$^O";
+my $isWindows = 0;
+
+if ( $osName eq 'MSWin32' )
+{
+  $isWindows = 1;
+}
 
 # Runtime splash.
 print "Transwave Atom Smasher (Ensoniq EPS16/ASR Tool) -- Version $currentVersion, $currentYear \n\n";
@@ -49,7 +57,16 @@ my $WAVinput;
 ##################################################
 
 # Check for SoX utility and quit if not present -- as a critical component, it's checked early before any conversions or disk writing takes place.
-my $soxExe=".\\tools\\sox\\sox.exe";			# path to SoX executable, path needs double-slashes as escape
+my $soxExe = "";
+if ( $isWindows eq 1 )
+{
+  $soxExe = ".\\tools\\sox\\sox.exe";      # path to SoX executable, path needs double-slashes as escape
+}
+else
+{
+  $soxExe = `which sox`;
+}
+$soxExe =~ s/^\s+|\s+$//g;
 die "Critical Error: SoX has been moved or does not exist! \n" unless (-e $soxExe);
 
 # Must call SoX as a child process via system() as environment variables cannot be passed from perl to a parent process (SoX via batch).
@@ -112,7 +129,7 @@ seek(DATA_IN, 44, 0);
 
 # Calculates length of the WAV file less its header -- $inWAV_ByteSize is actually the correct size of bytes because 0 is an improper index
 while ( (read (DATA_IN, $inWAV_Buffer[$inWAV_ByteSize], 1)) != 0 ) {
-$inWAV_ByteSize++; # Increments the bytes read counter on every pass. This will hold the amount of bytes read in for the WAV binary.
+  $inWAV_ByteSize++; # Increments the bytes read counter on every pass. This will hold the amount of bytes read in for the WAV binary.
 }
 
 # Kludge to fix extra byte at end of file read in.
@@ -150,11 +167,18 @@ else
 print "Writing all transwave frame files... \n";
 
 # Name of output file to hold each raw transwave frame.
-my $outFrame='XFRAME.RAW';
+my $outFrame='xframe.raw';
 
 # Create blank monolithic transwave.
-system('if exist transwave.raw del transwave.raw >NUL');
-system('copy nul transwave.raw >NUL');
+if ($isWindows eq 1)
+{
+  system('if exist transwave.raw del transwave.raw >NUL');
+  system('copy nul transwave.raw >NUL');
+}
+else
+{
+  system('rm -f transwave.raw && touch transwave.raw');
+}
 
 # Process one file/frame per amount of frames possible.
 for my $currentFrame (0..$transwaveFrameAmt-1)
@@ -162,7 +186,7 @@ for my $currentFrame (0..$transwaveFrameAmt-1)
 	# Open/create binary file to write one transwave frame.
 	open(DATA_OUT, "> $outFrame") or die "Error: Failed to access $outFrame for output! \n\n";
 	binmode(DATA_OUT);
-	
+
 	# Write complete transwave frame to the current output file.
 	# All transwave frame are exactly 512 bytes because each is 256 sample words in 16-bit form.
 	my $startLoc = $currentFrame * 512;
@@ -172,7 +196,7 @@ for my $currentFrame (0..$transwaveFrameAmt-1)
 	{
 		print DATA_OUT $inWAV_Buffer[$_];
 	}
-	
+
 	# Close the output file before ending routine.
 	close(DATA_OUT) || die "Error: Couldn't close the output file properly! \n\n";
 
@@ -182,24 +206,31 @@ for my $currentFrame (0..$transwaveFrameAmt-1)
 
 	# Creates properly faded frame in the current folder.
 	my $soxCmdA = " -V1 -D -r 44100 -b 16 -c 1 -e signed -t raw " . $outFrame;
-	my $soxCmdB = " -r 44100 -b 16 -c 1 -e signed -t raw NEWTRANS.RAW fade p 10s 256s 10s";
+	my $soxCmdB = " -r 44100 -b 16 -c 1 -e signed -t raw newtrans.raw fade p 10s 256s 10s";
 	system($soxExe . $soxCmdA . $soxCmdB);
-	
+
 	# Delete original frame after processing. Give user a non-critical error message if file could not be erased.
 	unlink ($outFrame) || warn "Error: Transwave frame could not be deleted. \n";
-	
+
 	# Merge current transwave frame into monolithic transwave.
-	system('copy /B TRANSWAVE.RAW + NEWTRANS.RAW TRANSWAVE.RAW >NUL');
-	
+  if ( $isWindows eq 1 )
+  {
+    system('copy /B TRANSWAVE.RAW + NEWTRANS.RAW TRANSWAVE.RAW >NUL');
+  }
+  else
+  {
+    system('cat transwave.raw newtrans.raw > merge.raw && mv merge.raw transwave.raw');
+  }
+
 	# Delete processed frame after merge. Give user a non-critical error message if file could not be erased.
-	unlink ('NEWTRANS.RAW') || warn "Error: Processed transwave frame could not be deleted. \n";
+	unlink ('newtrans.raw') || warn "Error: Processed transwave frame could not be deleted. \n";
 
 }
 
 print "Transwave frames have been processed and exported! \n";
 
 # Convert monolithic transwave into a usable WAV.
-$soxCmd = " -V1 -r 44100 -b 16 -c 1 -e signed -t raw TRANSWAVE.RAW TRANSWAVE.WAV";
+$soxCmd = " -V1 -r 44100 -b 16 -c 1 -e signed -t raw transwave.raw transwave.wav";
 system($soxExe . $soxCmd);
 
 ###################
@@ -207,7 +238,7 @@ system($soxExe . $soxCmd);
 ###################
 
 # Delete raw monolithic transwave after processing. Give user a non-critical error message if file could not be erased.
-unlink ('TRANSWAVE.RAW') || warn "Error: Monolithic transwave could not be deleted. \n";
+unlink ('transwave.raw') || warn "Error: Monolithic transwave could not be deleted. \n";
 
 # End program.
 exit;
